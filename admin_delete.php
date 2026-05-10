@@ -1,18 +1,19 @@
 <?php
 /**
  * admin_delete.php
- * Deletes an admin account from tbuser.
- * This is a GET-request handler (confirmation is done client-side via JS confirm()).
- * After deletion redirects to admin_list.php with a flash message.
- * Protected: admin session required.
+ * Deletes an Employee account from the database.
  *
- * ERD table: tbuser  (user_id, full_name, email, password, role, department, student_or_employee_id)
+ * Schema notes (dbcit_stickerapp):
+ *   `user`     : user_id (PK), full_name, email, password, user_type
+ *   `employee` : user_id (FK → user.user_id ON DELETE CASCADE)
  *
- * Security:
- *  - Requires admin session.
- *  - ID is cast to int to prevent injection.
- *  - Restricts DELETE to role = 'admin' rows only.
- *  - Prevents an admin from deleting their own account.
+ *   Deleting from `user` automatically CASCADE-deletes the `employee` row.
+ *   No need to delete from `employee` separately.
+ *
+ *   Safety checks:
+ *     - ID must be a positive integer (ctype_digit)
+ *     - Target must exist and have user_type = 'Employee'
+ *     - Logged-in user cannot delete their own account
  */
 
 require_once 'includes/auth_guard.php';
@@ -24,20 +25,22 @@ if (!isset($_GET['id']) || !ctype_digit($_GET['id'])) {
     exit();
 }
 
-$delete_id     = (int)$_GET['id'];
-$logged_in_id  = (int)$_SESSION['username']; /* session stores user_id in 'username' key per login.php */
+$delete_id    = (int)$_GET['id'];
+$logged_in_id = (int)$_SESSION['user_id'];   /* set by login.php as $_SESSION['user_id'] */
 
 /* ── Prevent self-deletion ── */
 if ($delete_id === $logged_in_id) {
-    $_SESSION['flash_message'] = 'You cannot delete your own administrator account.';
+    $_SESSION['flash_message'] = 'You cannot delete your own account.';
     $_SESSION['flash_type']    = 'error';
     header('Location: admin_list.php');
     exit();
 }
 
-/* ── Confirm the record exists and is an admin before deleting ── */
+/* ── Confirm target exists and is an Employee ── */
 $check = $connection->prepare(
-    "SELECT full_name FROM tbuser WHERE user_id = ? AND role = 'admin' LIMIT 1"
+    "SELECT full_name FROM `user`
+      WHERE user_id = ? AND user_type = 'Employee'
+      LIMIT 1"
 );
 $check->bind_param('i', $delete_id);
 $check->execute();
@@ -45,7 +48,7 @@ $row = $check->get_result()->fetch_assoc();
 $check->close();
 
 if (!$row) {
-    $_SESSION['flash_message'] = 'Admin account not found.';
+    $_SESSION['flash_message'] = 'Employee account not found.';
     $_SESSION['flash_type']    = 'error';
     header('Location: admin_list.php');
     exit();
@@ -53,15 +56,15 @@ if (!$row) {
 
 $deleted_name = $row['full_name'];
 
-/* ── Execute delete ── */
+/* ── Execute delete (CASCADE removes employee row automatically) ── */
 $stmt = $connection->prepare(
-    "DELETE FROM tbuser WHERE user_id = ? AND role = 'admin'"
+    "DELETE FROM `user` WHERE user_id = ? AND user_type = 'Employee'"
 );
 $stmt->bind_param('i', $delete_id);
 
 if ($stmt->execute() && $stmt->affected_rows > 0) {
     $stmt->close();
-    $_SESSION['flash_message'] = 'Admin account for "' . $deleted_name . '" has been deleted.';
+    $_SESSION['flash_message'] = 'Account for "' . htmlspecialchars($deleted_name) . '" has been deleted.';
     $_SESSION['flash_type']    = 'success';
 } else {
     $stmt->close();
