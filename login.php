@@ -2,33 +2,30 @@
 /**
  * login.php
  * CIT University Parking Management System — Login
- *
- * Schema notes (dbcit_stickerapp):
- *   Table  : `user`
- *   Columns: user_id, full_name, email, password, user_type ENUM('Student','Employee')
- *
- *   Only users with user_type = 'Employee' may log in to the admin panel.
- *   After login the session stores:
- *     $_SESSION['user_id']   = user.user_id
- *     $_SESSION['full_name'] = user.full_name
- *     $_SESSION['user_type'] = 'Employee'
  */
 
 session_start();
 
-/* Already authenticated — skip to dashboard */
-if (!empty($_SESSION['user_id']) && $_SESSION['user_type'] === 'Employee') {
-    header('Location: dashboard.php');
-    exit();
-}
-
 require_once 'connect.php';
+
+// Only redirect if user is actually logged in
+if (isset($_SESSION['user_id']) && !empty($_SESSION['user_id'])) {
+    // Redirect based on user type
+    if ($_SESSION['user_type'] === 'Employee') {
+        header('Location: dashboard.php');
+        exit();
+    } else {
+        // For students, redirect to register or student page
+        header('Location: register.php');
+        exit();
+    }
+}
 
 $email  = '';
 $errors = [];
 $flash  = '';
 
-/* Consume flash from logout */
+/* Consume flash from logout or register */
 if (isset($_SESSION['flash_message'])) {
     $flash = $_SESSION['flash_message'];
     unset($_SESSION['flash_message']);
@@ -51,29 +48,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['btnLogin'])) {
     }
 
     if (empty($errors)) {
-        /*
-         * Query: user table only — user_type must be 'Employee'
-         * Column map: email → user.email | password → user.password
-         *             user_type → user.user_type ('Employee' = admin panel access)
-         */
         $stmt = $connection->prepare(
             "SELECT user_id, full_name, password, user_type
                FROM `user`
-              WHERE email = ? AND user_type = 'Employee'
+              WHERE email = ?
               LIMIT 1"
         );
         $stmt->bind_param('s', $email);
         $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
         $stmt->close();
 
         if ($row && password_verify($password, $row['password'])) {
             session_regenerate_id(true);
             $_SESSION['user_id']   = $row['user_id'];
             $_SESSION['full_name'] = $row['full_name'];
-            $_SESSION['user_type'] = $row['user_type'];   /* 'Employee' */
+            $_SESSION['user_type'] = $row['user_type'];
 
-            header('Location: dashboard.php');
+            // Redirect based on user type
+            if ($row['user_type'] === 'Employee') {
+                header('Location: dashboard.php');
+            } else {
+                // For students, show message and redirect to register
+                $_SESSION['flash_message'] = 'Student accounts are not yet supported. Please use an Employee account.';
+                header('Location: register.php');
+            }
             exit();
         } else {
             $errors['_general'] = 'Invalid email address or password. Please try again.';
@@ -103,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['btnLogin'])) {
     <div class="auth-card">
 
         <h2>Log In</h2>
-        <p class="auth-subtitle">Access your account</p>
+        <p class="auth-subtitle">Access your employee account</p>
 
         <?php if ($flash): ?>
             <div class="flash-success"><?php echo htmlspecialchars($flash); ?></div>
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['btnLogin'])) {
         <form method="POST" action="login.php" novalidate id="loginForm">
 
             <div class="form-group-cit">
-                <label class="form-label-cit" for="email">Email</label>
+                <label class="form-label-cit" for="email">Email Address</label>
                 <input type="email" id="email" name="email"
                     class="form-control-cit <?php echo isset($errors['email']) ? 'is-invalid' : ''; ?>"
                     placeholder="your.email@university.edu"
@@ -142,12 +142,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['btnLogin'])) {
                 <a href="#">Forgot Password?</a>
             </div>
 
-            <button type="submit" name="btnLogin" class="btn-cit-primary btn-block">Login</button>
+            <button type="submit" name="btnLogin" class="btn-cit-primary btn-block">Login to Dashboard</button>
 
         </form>
 
         <p class="auth-footer-text">
-            Don&apos;t have an account?&nbsp;<a href="register.php">Register</a>
+            Don't have an employee account?&nbsp;<a href="register.php">Register here</a>
         </p>
 
     </div>
@@ -178,7 +178,10 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
     const ev = document.getElementById('email').value.trim();
     if (!ev) err('email', 'Email address is required.');
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ev)) err('email', 'Enter a valid email address.');
-    if (!document.getElementById('password').value) err('password', 'Password is required.');
+    
+    const pw = document.getElementById('password').value;
+    if (!pw) err('password', 'Password is required.');
+    
     if (!ok) e.preventDefault();
 });
 </script>
